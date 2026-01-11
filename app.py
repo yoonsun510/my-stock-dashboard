@@ -40,8 +40,8 @@ def check_password():
         return True
 
 if check_password():
-    # 1. 페이지 설정 (이름도 '감독'으로 변경)
-    st.set_page_config(page_title="감독 투자 엔진", layout="wide")
+    # 1. 페이지 설정 (이름도 '감독님'으로 변경)
+    st.set_page_config(page_title="감독님 투자 엔진", layout="wide")
 
     @st.cache_data(ttl=5)
     def load_data(url):
@@ -65,7 +65,7 @@ if check_password():
         target = 350000000
 
         # --- 화면 구성 시작 ---
-        st.markdown('<p class="main-title">🚀 감독 투자 성장 엔진</p>', unsafe_allow_html=True)
+        st.markdown('<p class="main-title">🚀 감독님 투자 성장 엔진</p>', unsafe_allow_html=True)
         st.markdown(f'<p class="date-text">📅 기준 일자: {last_date}</p>', unsafe_allow_html=True)
         
         c1, c2, c3 = st.columns(3)
@@ -108,3 +108,4 @@ if check_password():
         # --- 마지막 멘트 (요청하신 부분) ---
         st.divider()
         st.markdown('<p class="footer-text">💰 성공적인 투자를 기원합니다, 감독님! 💰</p>', unsafe_allow_html=True)
+
