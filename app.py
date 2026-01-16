@@ -35,22 +35,40 @@ if check_password():
     @st.cache_data(ttl=5)
     def load_data(url):
         try:
-            df_raw = pd.read_csv(url)
-            df_raw.columns = [str(c).strip() for c in df_raw.columns]
-            # 1. 날짜를 날짜형식으로 변환 (시간은 버림)
-            df_raw['날짜'] = pd.to_datetime(df_raw['날짜']).dt.date
-            # 2. 숫자로 변환 (콤마 제거 등)
-            for col in df_raw.columns:
+            # [복구] 가장 안정적이었던 로직으로 데이터를 읽어옵니다.
+            raw = pd.read_csv(url, header=None)
+            header_idx = -1
+            for r_idx, row in raw.iterrows():
+                for c_idx, value in enumerate(row):
+                    if str(value).strip() == "날짜":
+                        header_idx = r_idx
+                        break
+                if header_idx != -1: break
+            
+            if header_idx == -1: return None
+            
+            df = raw.iloc[header_idx:].copy()
+            df.columns = df.iloc[0]
+            df = df[1:].copy()
+            df.columns = [str(c).strip() for c in df.columns]
+            df = df.loc[:, df.columns != "nan"]
+            
+            # 날짜 정리 (시간 제거)
+            df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce').dt.date
+            df = df.dropna(subset=['날짜'])
+            
+            # 숫자 변환
+            for col in df.columns:
                 if col not in ['날짜', '비고']:
-                    df_raw[col] = pd.to_numeric(df_raw[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-            return df_raw
+                    df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+            return df
         except: return None
 
     sheet_url = "https://docs.google.com/spreadsheets/d/1pbs8DBqbpNfsV-C_Am5Y1PpnfaueepxSTW_lsFCD7w4/export?format=csv"
     df = load_data(sheet_url)
 
-    if df is not None:
-        # --- [핵심 수정] 무조건 시트의 가장 마지막 줄(최신)을 가져옴 ---
+    if df is not None and not df.empty:
+        # [핵심] 시트의 맨 마지막 줄(최신 기록)을 가져옵니다.
         latest_row = df.iloc[-1] 
         last_date = latest_row['날짜']
         total_assets = latest_row['총 자산']
@@ -58,7 +76,7 @@ if check_password():
 
         # 상단 요약
         st.markdown('<p class="main-title">🚀 감독 투자 성장 엔진</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="date-text">📅 최종 업데이트: {last_date}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="date-text">📅 최종 기록일: {last_date}</p>', unsafe_allow_html=True)
         
         c1, c2, c3 = st.columns(3)
         c1.metric("현재 총 재산액", f"{total_assets:,.0f}원")
@@ -87,17 +105,11 @@ if check_password():
         summary_data = [{"항목": col, "금액": latest_row[col]} for col in asset_cols if col in df.columns]
         st.table(pd.DataFrame(summary_data).style.format({"금액": "{:,.0f}원"}))
 
-        # --- [핵심 수정] 전체 자산 성장 흐름 그래프 최적화 ---
+        # 전체 자산 성장 흐름 (요청하신 대로 최적화)
         st.subheader("📉 전체 자산 성장 흐름")
-        # x축을 'category'로 설정하여 시간 단위 없이 날짜만 순서대로 표시
         fig_area = px.area(df, x='날짜', y='총 자산', color_discrete_sequence=['#2E7D32'])
-        fig_area.update_xaxes(type='category', tickformat='%Y-%m-%d') 
-        fig_area.update_layout(
-            dragmode='pan', # 가로 이동만 가능
-            yaxis_fixedrange=True, # 세로 고정
-            xaxis_title="기록 날짜",
-            yaxis_title="총 자산액"
-        )
+        fig_area.update_xaxes(type='category') # 시간 단위 제거
+        fig_area.update_layout(dragmode='pan', yaxis_fixedrange=True) # 가로 이동만 허용
         st.plotly_chart(fig_area, use_container_width=True)
 
         # 상세 종목별 투자 현황
@@ -112,7 +124,6 @@ if check_password():
             cur_eval, cur_orig = latest_row[e_col], latest_row[o_col]
             detail_items.append({"종목": name, "평가액": cur_eval, "원금": cur_orig, "수익률": ((cur_eval-cur_orig)/cur_orig*100) if cur_orig!=0 else 0})
             
-            # 수익률 추이용 데이터
             temp_df = df[['날짜', o_col, e_col]].copy()
             temp_df['종목'] = name
             temp_df['수익률(%)'] = ((temp_df[e_col] - temp_df[o_col]) / temp_df[o_col] * 100).fillna(0)
@@ -120,7 +131,7 @@ if check_password():
         
         st.dataframe(pd.DataFrame(detail_items).style.format({"평가액": "{:,.0f}원", "원금": "{:,.0f}원", "수익률": "{:.2f}%"}), use_container_width=True)
 
-        # 수익률 추이 그래프 (날짜 고정)
+        # 상세 종목별 수익률 추이
         st.subheader("📈 상세 종목별 수익률 추이")
         if history_yields:
             all_history = pd.concat(history_yields)
@@ -129,6 +140,7 @@ if check_password():
             fig_line.update_layout(dragmode='pan', yaxis_fixedrange=True)
             st.plotly_chart(fig_line, use_container_width=True)
 
-        # 마지막 멘트
         st.divider()
         st.markdown('<p class="footer-text">💰 성공적인 투자를 기원합니다, 감독님! 💰</p>', unsafe_allow_html=True)
+    else:
+        st.error("데이터를 불러오지 못했습니다. 구글 시트의 '날짜' 열이 올바른지 확인해주세요.")
