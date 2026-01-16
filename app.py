@@ -35,14 +35,13 @@ if check_password():
     @st.cache_data(ttl=5)
     def load_data(url):
         try:
-            # 시트의 모든 데이터를 읽어옴
             df_raw = pd.read_csv(url)
             df_raw.columns = [str(c).strip() for c in df_raw.columns]
-            # 날짜 형식 정리 (시간 제거)
+            # 1. 날짜를 날짜형식으로 변환 (시간은 버림)
             df_raw['날짜'] = pd.to_datetime(df_raw['날짜']).dt.date
-            # 숫자로 변환
+            # 2. 숫자로 변환 (콤마 제거 등)
             for col in df_raw.columns:
-                if col != '날짜' and col != '비고':
+                if col not in ['날짜', '비고']:
                     df_raw[col] = pd.to_numeric(df_raw[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             return df_raw
         except: return None
@@ -51,15 +50,15 @@ if check_password():
     df = load_data(sheet_url)
 
     if df is not None:
-        # 중요: 가장 최근 데이터(마지막 행)를 상단 지표에 사용
+        # --- [핵심 수정] 무조건 시트의 가장 마지막 줄(최신)을 가져옴 ---
         latest_row = df.iloc[-1] 
         last_date = latest_row['날짜']
         total_assets = latest_row['총 자산']
         target = 350000000
 
-        # 1. 상단 요약 (최신 데이터 자동 반영)
+        # 상단 요약
         st.markdown('<p class="main-title">🚀 감독 투자 성장 엔진</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="date-text">📅 기준 일자: {last_date}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="date-text">📅 최종 업데이트: {last_date}</p>', unsafe_allow_html=True)
         
         c1, c2, c3 = st.columns(3)
         c1.metric("현재 총 재산액", f"{total_assets:,.0f}원")
@@ -68,7 +67,7 @@ if check_password():
         st.progress(min(max(total_assets/target, 0.0), 1.0))
         st.divider()
 
-        # 2. 자산 유형별 비중
+        # 자산 유형별 비중
         st.subheader("📊 자산 유형별 비중 (주식/코인/현금)")
         stock_sum = latest_row.get('삼성증권', 0) + latest_row.get('KB증권', 0) + latest_row.get('한국투자증권', 0)
         coin_sum = latest_row.get('업비트', 0)
@@ -82,20 +81,26 @@ if check_password():
             st.table(type_df.style.format({"금액": "{:,.0f}원"}))
         st.divider()
 
-        # 3. 증권사별 자산 요약 (최신 데이터 반영)
+        # 증권사별 자산 요약
         st.subheader("📋 증권사별 자산 요약")
         asset_cols = ['삼성증권', 'KB증권', '한국투자증권', '업비트', '우리은행', '카카오뱅크']
         summary_data = [{"항목": col, "금액": latest_row[col]} for col in asset_cols if col in df.columns]
         st.table(pd.DataFrame(summary_data).style.format({"금액": "{:,.0f}원"}))
 
-        # 4. 전체 자산 성장 흐름 (날짜만 표시 + 가로 이동 제한)
+        # --- [핵심 수정] 전체 자산 성장 흐름 그래프 최적화 ---
         st.subheader("📉 전체 자산 성장 흐름")
+        # x축을 'category'로 설정하여 시간 단위 없이 날짜만 순서대로 표시
         fig_area = px.area(df, x='날짜', y='총 자산', color_discrete_sequence=['#2E7D32'])
-        fig_area.update_xaxes(type='category') # 날짜를 간격별로 고정 (시간 단위 제거)
-        fig_area.update_layout(dragmode='pan', yaxis_fixedrange=True) # 위아래 고정, 가로 이동(pan)만 허용
+        fig_area.update_xaxes(type='category', tickformat='%Y-%m-%d') 
+        fig_area.update_layout(
+            dragmode='pan', # 가로 이동만 가능
+            yaxis_fixedrange=True, # 세로 고정
+            xaxis_title="기록 날짜",
+            yaxis_title="총 자산액"
+        )
         st.plotly_chart(fig_area, use_container_width=True)
 
-        # 5. 상세 종목별 투자 현황 (최신 데이터 반영)
+        # 상세 종목별 투자 현황
         st.subheader("📊 상세 종목별 투자 현황")
         orig_cols = [c for c in df.columns if '원금' in c]
         detail_items = []
@@ -107,7 +112,7 @@ if check_password():
             cur_eval, cur_orig = latest_row[e_col], latest_row[o_col]
             detail_items.append({"종목": name, "평가액": cur_eval, "원금": cur_orig, "수익률": ((cur_eval-cur_orig)/cur_orig*100) if cur_orig!=0 else 0})
             
-            # 수익률 추이 그래프 데이터
+            # 수익률 추이용 데이터
             temp_df = df[['날짜', o_col, e_col]].copy()
             temp_df['종목'] = name
             temp_df['수익률(%)'] = ((temp_df[e_col] - temp_df[o_col]) / temp_df[o_col] * 100).fillna(0)
@@ -115,7 +120,7 @@ if check_password():
         
         st.dataframe(pd.DataFrame(detail_items).style.format({"평가액": "{:,.0f}원", "원금": "{:,.0f}원", "수익률": "{:.2f}%"}), use_container_width=True)
 
-        # 6. 상세 종목별 수익률 추이 (날짜 고정)
+        # 수익률 추이 그래프 (날짜 고정)
         st.subheader("📈 상세 종목별 수익률 추이")
         if history_yields:
             all_history = pd.concat(history_yields)
@@ -124,9 +129,6 @@ if check_password():
             fig_line.update_layout(dragmode='pan', yaxis_fixedrange=True)
             st.plotly_chart(fig_line, use_container_width=True)
 
-        # 7. 증권사별 자산 비중
-        st.subheader("🍰 증권사별 자산 비중")
-        st.plotly_chart(px.pie(pd.DataFrame(summary_data), values='금액', names='항목', hole=0.3), use_container_width=True)
-
+        # 마지막 멘트
         st.divider()
         st.markdown('<p class="footer-text">💰 성공적인 투자를 기원합니다, 감독님! 💰</p>', unsafe_allow_html=True)
